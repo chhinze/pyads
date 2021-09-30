@@ -864,6 +864,43 @@ def adsGetSymbolInfo(port: int, address: AmsAddr, data_name: str) -> SAdsSymbolE
     return symbol_info
 
 
+def adsSumReadBytes(
+    port: int,
+    address: AmsAddr,
+    data_symbols: List[Tuple[int, int, int]],
+) -> Any:
+    """Perform a sum read for multiple variables, returning the bytes
+
+    This version does not do any processing, and will simply return the concatenation
+    of the bytes of the target symbols.
+
+    :param int port: local AMS port as returned by adsPortOpenEx()
+    :param pyads.structs.AmsAddr address: local or remote AmsAddr
+    :param data_symbols: list of tuples like: (index_group, index_offset, size)
+    """
+    num_requests = len(data_symbols)
+    sum_req_array_type = SAdsSumRequest * num_requests
+    sum_req_array = sum_req_array_type()
+
+    for i, data_symbol in enumerate(data_symbols):
+        idx_group, idx_offset, size = data_symbol
+        sum_req_array[i].iGroup = idx_group
+        sum_req_array[i].iOffset = idx_offset
+        sum_req_array[i].size = size
+
+    return adsSyncReadWriteReqEx2(
+        port,
+        address,
+        ADSIGRP_SUMUP_READ,
+        num_requests,
+        None,
+        sum_req_array,
+        None,
+        return_ctypes=False,
+        check_length=False,
+    )
+
+
 def adsSumRead(
     port: int, address: AmsAddr, data_names: List[str], data_symbols: Dict[str, SAdsSymbolEntry],
     structured_data_names: List[str],
@@ -882,28 +919,15 @@ def adsSumRead(
     result: Dict[str, Optional[Any]] = {i: None for i in data_names}
 
     num_requests = len(data_names)
-    sum_req_array_type = SAdsSumRequest * num_requests
-    sum_req_array = sum_req_array_type()
 
-    for i, value in enumerate(data_names):
-        sum_req_array[i].iGroup = data_symbols[value].iGroup
-        sum_req_array[i].iOffset = data_symbols[value].iOffs
-        sum_req_array[i].size = data_symbols[value].size
+    symbol_infos = [
+        (data.iGroup, data.iOffs, data.size) for _, data in data_symbols.items()
+    ]
 
-    sum_response = adsSyncReadWriteReqEx2(
-        port,
-        address,
-        ADSIGRP_SUMUP_READ,
-        num_requests,
-        None,
-        sum_req_array,
-        None,
-        return_ctypes=False,
-        check_length=False,
-    )
+    sum_response = adsSumReadBytes(port, address, symbol_infos)
 
-    offset = 0
     data_start = 4 * num_requests
+    offset = data_start
 
     for i, data_name in enumerate(data_names):
         error = struct.unpack_from("<I", sum_response, offset=i * 4)[0]
@@ -912,8 +936,7 @@ def adsSumRead(
         else:
             if data_name in structured_data_names:
                 value = sum_response[
-                    data_start + offset :
-                    data_start + offset + data_symbols[data_name].size]
+                    offset: offset + data_symbols[data_name].size]
             elif (
                 data_symbols[data_name].dataType != ADST_STRING
                 and data_symbols[data_name].dataType != ADST_WSTRING
@@ -921,17 +944,14 @@ def adsSumRead(
                 value = struct.unpack_from(
                     DATATYPE_MAP[ads_type_to_ctype[data_symbols[data_name].dataType]],
                     sum_response,
-                    offset=data_start + offset,
+                    offset=offset,
                 )[0]
             else:
                 null_idx = sum_response[
-                    data_start
-                    + offset : data_start
-                    + offset
-                    + data_symbols[data_name].size
+                    offset: offset + data_symbols[data_name].size
                 ].index(0)
                 value = bytearray(
-                    sum_response[data_start + offset : data_start + offset + null_idx]
+                    sum_response[offset: offset + null_idx]
                 ).decode("utf-8")
             result[data_name] = value
         offset += data_symbols[data_name].size

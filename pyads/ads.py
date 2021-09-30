@@ -71,6 +71,7 @@ from .pyads_ex import (
     adsGetNetIdForPLC,
     adsGetSymbolInfo,
     adsSumRead,
+    adsSumReadBytes,
     adsSumWrite,
     adsReleaseHandle,
     adsSyncReadByNameEx,
@@ -80,6 +81,7 @@ from .pyads_ex import (
     adsSyncSetTimeoutEx,
     adsSetLocalAddress,
     ADSError,
+    type_is_string,
 )
 from .structs import (
     AmsAddr,
@@ -89,6 +91,7 @@ from .structs import (
     SAdsNotificationHeader,
     SAdsSymbolEntry,
 )
+from .errorcodes import ERROR_CODES
 from .symbol import AdsSymbol
 from .utils import decode_ads, platform_is_linux
 
@@ -1127,6 +1130,75 @@ class Connection(object):
         return self.write_by_name(
             data_name, byte_values, c_ubyte * structure_size, handle=handle
         )
+
+    def read_list_symbols(self, symbols: List[AdsSymbol], return_dict: bool = False):
+        """Read new values for a list of AdsSymbols using a single ADS call.
+
+        The outputs will be returned as a dictionary, but the cache of each symbol will
+        be updated too.
+
+        Comparable to :meth:`Connection.read_list_by_name`.
+        See also :class:`pyads.AdsSymbol`.
+
+        :param symbols: List if symbol instances
+        :param return_dict: If True, a dictionary with the new values are returned.
+                            (default: False)
+        """
+
+        # Relying on `adsSumRead()` is tricky, because we do not have the `dataType`
+        # (integer) for each symbol, we only have the ctypes-type.
+        # Instead a very similar low-level read is done.
+
+        if return_dict:
+            result = {symbol.name: None for symbol in symbols}
+        else:
+            result = None
+
+        symbol_infos = [(sym.index_group, sym.index_offset, sizeof(sym.plc_type))
+                        for sym in symbols]
+
+        sum_response = adsSumReadBytes(self._port, self._adr, symbol_infos)
+
+        data_start = 4 * len(symbols)
+        offset = data_start
+
+        for i, symbol in enumerate(symbols):
+
+            if symbol.is_structure:
+                raise ValueError("Method not available for structured variables")
+
+            # Check if read was successful for this variable
+            error = struct.unpack_from("<I", sum_response, offset=i * 4)[0]
+            if error:
+                if return_dict:
+                    result[symbol.name] = ERROR_CODES[error]
+                # In case no dict was requested, there is no error reported...
+            else:
+                # Convert the bytes for this variable to a real value
+                if type_is_string(symbol.plc_type):  # String
+                    null_idx = sum_response[
+                                    offset: offset + sizeof(symbol.plc_type)
+                               ].index(0)
+                    value = bytearray(
+                        sum_response[offset: offset + null_idx]
+                    ).decode("utf-8")
+
+                else:  # Regular type
+                    value = struct.unpack_from(
+                        DATATYPE_MAP[symbol.plc_type],
+                        sum_response,
+                        offset=offset,
+                    )[0]
+                    # This won't work for array types!
+
+                if return_dict:
+                    result[symbol.name] = value
+
+                symbol._value = value  # Update symbol cache
+
+            offset += sizeof(symbol.plc_type)
+
+        return result
 
     def add_device_notification(
         self,
