@@ -212,6 +212,35 @@ def type_is_string(plc_type: Type) -> bool:
     return False
 
 
+def convert_data_to_value(read_data: Optional[Any], plc_type: Type) -> Any:
+    """Convert ctypes data object to a regular value based on the PLCTYPE_* property.
+
+    Typical usage is:
+
+    .. code:: python
+
+        obj = my_plc_type.from_buffer(my_buffer)
+        value = convert_data_to_value(obj, my_plc_type)
+
+    :param read_data: ctypes._CData object
+    :param plc_type: pyads.PLCTYPE_* constant (i.e. a ctypes-like type)
+    """
+
+    if read_data is None:
+        return None
+
+    if type_is_string(plc_type):
+        return read_data.value.decode("utf-8")
+
+    if type(plc_type).__name__ == "PyCArrayType":
+        return [i for i in read_data]
+
+    if hasattr(read_data, "value"):
+        return read_data.value
+
+    return read_data  # Just return the object itself, don't throw an error
+
+
 @router_function
 def adsAddRouteToPLC(
     sending_net_id: str,
@@ -718,16 +747,7 @@ def adsSyncReadWriteReqEx2(
     if return_ctypes:
         return read_data
 
-    if read_data is not None and type_is_string(read_data_type):
-        return read_data.value.decode("utf-8")
-
-    if read_data is not None and type(read_data_type).__name__ == "PyCArrayType":
-        return [i for i in read_data]
-
-    if read_data is not None and hasattr(read_data, "value"):
-        return read_data.value
-
-    return read_data
+    return convert_data_to_value(read_data, read_data_type)
 
 
 def adsSyncReadReqEx2(
@@ -802,22 +822,7 @@ def adsSyncReadReqEx2(
     if return_ctypes:
         return data
 
-    if type_is_string(data_type):
-        # Note: this does not catch a string with a specified size
-        return data.value.decode("utf-8")
-
-    if type(data_type).__name__ == "PyCArrayType":
-
-        if type_is_string(data_type._type_):
-            # If the type is a char-array
-            return data.value.decode("utf-8")
-
-        return [i for i in data]
-
-    if hasattr(data, "value"):
-        return data.value
-
-    return data
+    return convert_data_to_value(data, data_type._type)
 
 
 def adsGetHandle(port: int, address: AmsAddr, data_name: str) -> int:

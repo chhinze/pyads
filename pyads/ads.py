@@ -17,6 +17,7 @@ from ctypes import (
     Structure,
     sizeof,
     create_string_buffer,
+    pointer,
 )
 from datetime import datetime
 from functools import partial
@@ -83,6 +84,7 @@ from .pyads_ex import (
     adsSetLocalAddress,
     ADSError,
     type_is_string,
+    convert_data_to_value,
 )
 from .structs import (
     AmsAddr,
@@ -1175,22 +1177,9 @@ class Connection(object):
                     result[symbol.name] = ERROR_CODES[error]
                 # In case no dict was requested, there is no error reported...
             else:
-                # Convert the bytes for this variable to a real value
-                if type_is_string(symbol.plc_type):  # String
-                    null_idx = sum_response[
-                                    offset: offset + sizeof(symbol.plc_type)
-                               ].index(0)
-                    value = bytearray(
-                        sum_response[offset: offset + null_idx]
-                    ).decode("utf-8")
+                obj = symbol.plc_type.from_buffer(sum_response, offset)
 
-                else:  # Regular type
-                    value = struct.unpack_from(
-                        DATATYPE_MAP[symbol.plc_type],
-                        sum_response,
-                        offset=offset,
-                    )[0]
-                    # This won't work for array types!
+                value = convert_data_to_value(obj, symbol.plc_type)
 
                 if return_dict:
                     result[symbol.name] = value
@@ -1214,6 +1203,7 @@ class Connection(object):
                            symbols is used instead as new values.
         """
 
+        # Initialize big buffer with new data to send over
         offset = 0
         num_requests = len(symbols)
         total_request_size = num_requests * 3 * 4  # iGroup, iOffset & size
@@ -1234,13 +1224,19 @@ class Connection(object):
             if symbol.is_structure:
                 raise ValueError("List write not supported for struct symbols")
 
-            value = new_values[i] if new_values is not None else symbol._value
+            new_value = new_values[i] if new_values is not None else symbol._value
 
-            # Put new values into buffer
+            # Convert value to bytes and insert into buffer
             if type_is_string(symbol.plc_type):
-                buf[offset: offset + len(value)] = value.encode("utf-8")
+                buf[offset: offset + len(new_value)] = new_value.encode("utf-8")
             else:
-                struct.pack_into(DATATYPE_MAP[symbol.plc_type], buf, offset, value)
+                if type(symbol.plc_type).__name__ == "PyCArrayType":
+                    write_data = symbol.plc_type(*new_value)
+                elif type(new_value) is symbol.plc_type:
+                    write_data = new_value
+                else:
+                    write_data = symbol.plc_type(new_value)
+                buf[offset: offset + sizeof(symbol.plc_type)] = bytes(write_data)
 
             offset += sizeof(symbol.plc_type)
 
