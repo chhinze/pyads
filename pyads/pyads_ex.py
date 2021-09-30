@@ -959,6 +959,35 @@ def adsSumRead(
     return result
 
 
+def adsSumWriteBytes(
+    port: int,
+    address: AmsAddr,
+    num_requests: int,
+    buffer: bytes,
+) -> List[str]:
+    """Perform a sum write of concatenated bytes to multiple symbols.
+
+    :return: List of errors
+    """
+
+    sum_response = adsSyncReadWriteReqEx2(
+        port,
+        address,
+        ADSIGRP_SUMUP_WRITE,
+        num_requests,
+        None,
+        buffer,
+        None,
+        return_ctypes=False,
+        check_length=False,
+    )
+
+    errors = list(struct.iter_unpack("<I", sum_response))
+    error_descriptions = [ERROR_CODES[i[0]] for i in errors]
+
+    return error_descriptions
+
+
 def adsSumWrite(
     port: int,
     address: AmsAddr,
@@ -1010,20 +1039,12 @@ def adsSumWrite(
             buf[offset : offset + len(value)] = value.encode("utf-8")
         offset += data_symbols[data_name].size
 
-    sum_response = adsSyncReadWriteReqEx2(
+    error_descriptions = adsSumWriteBytes(
         port,
         address,
-        ADSIGRP_SUMUP_WRITE,
         num_requests,
-        None,
         buf,
-        None,
-        return_ctypes=False,
-        check_length=False,
     )
-
-    errors = list(struct.iter_unpack("<I", sum_response))
-    error_descriptions = [ERROR_CODES[i[0]] for i in errors]
 
     return dict(zip(data_names_and_values.keys(), error_descriptions))
 

@@ -73,6 +73,7 @@ from .pyads_ex import (
     adsSumRead,
     adsSumReadBytes,
     adsSumWrite,
+    adsSumWriteBytes,
     adsReleaseHandle,
     adsSyncReadByNameEx,
     adsSyncWriteByNameEx,
@@ -1199,6 +1200,58 @@ class Connection(object):
             offset += sizeof(symbol.plc_type)
 
         return result
+
+    def write_list_symbols(
+        self,
+        symbols: List[AdsSymbol],
+        new_values: Optional[List[Any]] = None,
+    ):
+        """Write new values to a list of symbols.
+
+        :param symbols: Symbols to write to
+        :param new_values: List of new values (order matches with the list of
+                           symbols). If this is `None`, the `_value` cache of the
+                           symbols is used instead as new values.
+        """
+
+        offset = 0
+        num_requests = len(symbols)
+        total_request_size = num_requests * 3 * 4  # iGroup, iOffset & size
+
+        for symbol in symbols:
+            total_request_size += sizeof(symbol.plc_type)
+
+        buf = bytearray(total_request_size)
+
+        for symbol in symbols:
+            struct.pack_into("<I", buf, offset, symbol.index_group)
+            struct.pack_into("<I", buf, offset + 4, symbol.index_offset)
+            struct.pack_into("<I", buf, offset + 8, sizeof(symbol.plc_type))
+            offset += 12
+
+        for i, symbol in enumerate(symbols):
+
+            if symbol.is_structure:
+                raise ValueError("List write not supported for struct symbols")
+
+            value = new_values[i] if new_values is not None else symbol._value
+
+            # Put new values into buffer
+            if type_is_string(symbol.plc_type):
+                buf[offset: offset + len(value)] = value.encode("utf-8")
+            else:
+                struct.pack_into(DATATYPE_MAP[symbol.plc_type], buf, offset, value)
+
+            offset += sizeof(symbol.plc_type)
+
+        error_descriptions = adsSumWriteBytes(
+            self._port,
+            self._adr,
+            num_requests,
+            buf,
+        )
+
+        return error_descriptions
 
     def add_device_notification(
         self,
