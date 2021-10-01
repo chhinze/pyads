@@ -21,7 +21,7 @@ from ctypes import (
 )
 from datetime import datetime
 from functools import partial
-from typing import Optional, Union, Tuple, Any, Type, Callable, Dict, List, cast, Iterator
+from typing import Optional, Union, Tuple, Any, Type, Callable, Dict, List, cast
 
 # noinspection PyUnresolvedReferences
 from .constants import (
@@ -84,7 +84,7 @@ from .pyads_ex import (
     adsSetLocalAddress,
     ADSError,
     type_is_string,
-    convert_data_to_value,
+    get_value_from_ctype_data,
 )
 from .structs import (
     AmsAddr,
@@ -1134,7 +1134,7 @@ class Connection(object):
             data_name, byte_values, c_ubyte * structure_size, handle=handle
         )
 
-    def read_list_symbols(self, symbols: List[AdsSymbol], return_dict: bool = False):
+    def read_list_of_symbols(self, symbols: List[AdsSymbol]):
         """Read new values for a list of AdsSymbols using a single ADS call.
 
         The outputs will be returned as a dictionary, but the cache of each symbol will
@@ -1144,18 +1144,14 @@ class Connection(object):
         See also :class:`pyads.AdsSymbol`.
 
         :param symbols: List if symbol instances
-        :param return_dict: If True, a dictionary with the new values are returned.
-                            (default: False)
         """
 
         # Relying on `adsSumRead()` is tricky, because we do not have the `dataType`
         # (integer) for each symbol, we only have the ctypes-type.
         # Instead a very similar low-level read is done.
 
-        if return_dict:
-            result = {symbol.name: None for symbol in symbols}
-        else:
-            result = None
+        # Allocate return dict
+        result = {symbol.name: None for symbol in symbols}
 
         symbol_infos = [(sym.index_group, sym.index_offset, sizeof(sym.plc_type))
                         for sym in symbols]
@@ -1173,34 +1169,45 @@ class Connection(object):
             # Check if read was successful for this variable
             error = struct.unpack_from("<I", sum_response, offset=i * 4)[0]
             if error:
-                if return_dict:
-                    result[symbol.name] = ERROR_CODES[error]
-                # In case no dict was requested, there is no error reported...
+                result[symbol.name] = ERROR_CODES[error]
             else:
                 obj = symbol.plc_type.from_buffer(sum_response, offset)
 
-                value = convert_data_to_value(obj, symbol.plc_type)
+                value = get_value_from_ctype_data(obj, symbol.plc_type)
 
-                if return_dict:
-                    result[symbol.name] = value
-
+                result[symbol.name] = value
                 symbol._value = value  # Update symbol cache
 
             offset += sizeof(symbol.plc_type)
 
         return result
 
-    def write_list_symbols(
+    def write_list_of_symbols(
         self,
-        symbols: List[AdsSymbol],
-        new_values: Optional[List[Any]] = None,
+        symbols: Union[List[AdsSymbol], Dict[AdsSymbol, Any]],
     ):
         """Write new values to a list of symbols.
 
+        Either specify a dict of symbols, or first set the `_value` property of
+        each symbol and then pass them as a list.
+
+        For example:
+
+        .. code:: python
+
+            # Using dict
+            new_data = {symbol1: 3.14, symbol2: False}
+            plc.write_list_of_symbols(new_data)
+
+            # Using cache
+            symbol1._value = 3.14
+            symbol2._value = False
+            plc.write_list_of_symbols([symbol1, symbol2])
+
+        Comparable to :meth:`Connection.write_list_by_name`.
+        See also :class:`pyads.AdsSymbol`.
+
         :param symbols: Symbols to write to
-        :param new_values: List of new values (order matches with the list of
-                           symbols). If this is `None`, the `_value` cache of the
-                           symbols is used instead as new values.
         """
 
         # Initialize big buffer with new data to send over
@@ -1218,6 +1225,11 @@ class Connection(object):
             struct.pack_into("<I", buf, offset + 4, symbol.index_offset)
             struct.pack_into("<I", buf, offset + 8, sizeof(symbol.plc_type))
             offset += 12
+
+        if isinstance(symbols, dict):
+            new_values = list(symbols.keys())
+        else:
+            new_values = None
 
         for i, symbol in enumerate(symbols):
 

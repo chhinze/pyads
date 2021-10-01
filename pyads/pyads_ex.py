@@ -212,7 +212,7 @@ def type_is_string(plc_type: Type) -> bool:
     return False
 
 
-def convert_data_to_value(read_data: Optional[Any], plc_type: Type) -> Any:
+def get_value_from_ctype_data(read_data: Optional[Any], plc_type: Type) -> Any:
     """Convert ctypes data object to a regular value based on the PLCTYPE_* property.
 
     Typical usage is:
@@ -220,7 +220,7 @@ def convert_data_to_value(read_data: Optional[Any], plc_type: Type) -> Any:
     .. code:: python
 
         obj = my_plc_type.from_buffer(my_buffer)
-        value = convert_data_to_value(obj, my_plc_type)
+        value = get_value_from_ctype_data(obj, my_plc_type)
 
     :param read_data: ctypes._CData object
     :param plc_type: pyads.PLCTYPE_* constant (i.e. a ctypes-like type)
@@ -747,7 +747,7 @@ def adsSyncReadWriteReqEx2(
     if return_ctypes:
         return read_data
 
-    return convert_data_to_value(read_data, read_data_type)
+    return get_value_from_ctype_data(read_data, read_data_type)
 
 
 def adsSyncReadReqEx2(
@@ -822,7 +822,7 @@ def adsSyncReadReqEx2(
     if return_ctypes:
         return data
 
-    return convert_data_to_value(data, data_type._type)
+    return get_value_from_ctype_data(data, data_type._type)
 
 
 def adsGetHandle(port: int, address: AmsAddr, data_name: str) -> int:
