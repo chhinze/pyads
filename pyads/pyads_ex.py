@@ -822,7 +822,7 @@ def adsSyncReadReqEx2(
     if return_ctypes:
         return data
 
-    return get_value_from_ctype_data(data, data_type._type)
+    return get_value_from_ctype_data(data, data_type)
 
 
 def adsGetHandle(port: int, address: AmsAddr, data_name: str) -> int:
@@ -926,8 +926,11 @@ def adsSumRead(
     num_requests = len(data_names)
 
     symbol_infos = [
-        (data.iGroup, data.iOffs, data.size) for _, data in data_symbols.items()
+        (data_symbols[name].iGroup, data_symbols[name].iOffs,
+         data_symbols[name].size) for name in data_names
     ]
+    # When a read is split, `data_symbols` will be bigger than `data_names`
+    # Therefore we avoid looping over `data_symbols`
 
     sum_response = adsSumReadBytes(port, address, symbol_infos)
 
