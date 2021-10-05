@@ -23,7 +23,7 @@ from .ads import (
     StructureDef,
 )
 
-from .pyads_ex import ADSError
+from .pyads_common import ADSError
 
 from .constants import (
     PLCTYPE_BOOL,

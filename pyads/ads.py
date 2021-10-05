@@ -1134,7 +1134,11 @@ class Connection(object):
             data_name, byte_values, c_ubyte * structure_size, handle=handle
         )
 
-    def read_list_of_symbols(self, symbols: List[AdsSymbol]):
+    def read_list_of_symbols(
+        self,
+        symbols: List[AdsSymbol],
+        ads_sub_commands: int = MAX_ADS_SUB_COMMANDS,
+    ):
         """Read new values for a list of AdsSymbols using a single ADS call.
 
         The outputs will be returned as a dictionary, but the cache of each symbol will
@@ -1144,6 +1148,8 @@ class Connection(object):
         See also :class:`pyads.AdsSymbol`.
 
         :param symbols: List if symbol instances
+        :param ads_sub_commands: Max. number of symbols per call (see
+                                 `read_list_by_name`)
         """
 
         # Relying on `adsSumRead()` is tricky, because we do not have the `dataType`
